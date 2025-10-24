@@ -681,7 +681,7 @@ pub const Connection = struct {
 
         // Published messages go to pending_buffer during reconnection, otherwise write_buffer
         if (self.status == .reconnecting and self.options.reconnect.allow_reconnect) {
-            try self.pending_buffer.append(buffer.items);
+            try self.pending_buffer.append(self.allocator, buffer.items);
         } else {
             try self.write_buffer.append(buffer.items);
         }
@@ -711,11 +711,11 @@ pub const Connection = struct {
         const allocator = self.scratch.allocator();
         defer self.resetScratch();
 
-        var buffer = ArrayList(u8).init(allocator);
+        var buffer = try ArrayList(u8).initCapacity(allocator, 0);
         if (sub.queue) |group| {
-            try buffer.writer().print("SUB {s} {s} {d}\r\n", .{ sub.subject, group, sub.sid });
+            try buffer.print(self.allocator, "SUB {s} {s} {d}\r\n", .{ sub.subject, group, sub.sid });
         } else {
-            try buffer.writer().print("SUB {s} {d}\r\n", .{ sub.subject, sub.sid });
+            try buffer.print(self.allocator, "SUB {s} {d}\r\n", .{ sub.subject, sub.sid });
         }
         try self.write_buffer.append(buffer.items);
     }
@@ -1226,7 +1226,7 @@ pub const Connection = struct {
         defer self.resetScratch();
 
         // Build CONNECT message with all options
-        var buffer = ArrayList(u8).init(allocator);
+        var buffer = try ArrayList(u8).initCapacity(allocator, 0);
 
         // Calculate effective no_responders: enable if server supports headers
         const no_responders = self.options.no_responders and self.server_info.headers;
@@ -1253,13 +1253,23 @@ pub const Connection = struct {
             .auth_token = auth_token,
         };
 
-        try buffer.writer().writeAll("CONNECT ");
-        try std.json.stringify(connect_obj, .{}, buffer.writer());
-        try buffer.writer().writeAll("\r\n");
-        try buffer.writer().writeAll("PING\r\n");
-
+        var writer: std.Io.Writer.Allocating = .fromArrayList(self.allocator, &buffer);
+        try writer.writer.writeAll("CONNECT ");
+        try std.json.fmt(connect_obj, .{}).format(&writer.writer);
+        try writer.writer.writeAll("\r\n");
+        try writer.writer.writeAll("PING\r\n");
         // Send via buffer (mutex already held)
-        try self.write_buffer.append(buffer.items);
+        try self.write_buffer.append(try writer.toOwnedSlice());
+
+        ////////////////////////////////////////////////////////////////////////////////
+        // try buffer.writer().writeAll("CONNECT ");
+        // try std.json.stringify(connect_obj, .{}, buffer.writer());
+        // try buffer.writer().writeAll("\r\n");
+        // try buffer.writer().writeAll("PING\r\n");
+        //
+        // Send via buffer (mutex already held)
+        // try self.write_buffer.append(buffer.items);
+        ////////////////////////////////////////////////////////////////////////////////
 
         log.debug("Sent CONNECT+PING during handshake", .{});
     }
@@ -1738,8 +1748,9 @@ pub const Connection = struct {
         log.debug("Re-establishing subscriptions", .{});
 
         // Track SIDs that shouldn't be re-subscribed and must be removed
-        var to_remove = ArrayList(u64).init(self.allocator);
-        defer to_remove.deinit();
+        // var to_remove = ArrayList(u64).init(self.allocator);
+        var to_remove = try ArrayList(u64).initCapacity(self.allocator, 0);
+        defer to_remove.deinit(self.allocator);
 
         {
             self.subs_mutex.lock();
@@ -1748,7 +1759,7 @@ pub const Connection = struct {
             const allocator = self.scratch.allocator();
             defer self.resetScratch();
 
-            var buffer = ArrayList(u8).init(allocator);
+            var buffer = try ArrayList(u8).initCapacity(allocator, 0);
 
             var iter = self.subscriptions.iterator();
             while (iter.next()) |entry| {
@@ -1765,21 +1776,21 @@ pub const Connection = struct {
                     } else {
                         // Already reached limit - don't re-subscribe; remove after unlock
                         log.debug("Subscription {d} ({s}) already reached limit; will remove during reconnect", .{ sub.sid, sub.subject });
-                        try to_remove.append(sub.sid);
+                        try to_remove.append(self.allocator, sub.sid);
                         continue;
                     }
                 }
 
                 // Send SUB command
                 if (sub.queue) |queue| {
-                    try buffer.writer().print("SUB {s} {s} {d}\r\n", .{ sub.subject, queue, sub.sid });
+                    try buffer.print(self.allocator, "SUB {s} {s} {d}\r\n", .{ sub.subject, queue, sub.sid });
                 } else {
-                    try buffer.writer().print("SUB {s} {d}\r\n", .{ sub.subject, sub.sid });
+                    try buffer.print(self.allocator, "SUB {s} {d}\r\n", .{ sub.subject, sub.sid });
                 }
 
                 // Send UNSUB with remaining limit if needed
                 if (adjusted_max) |remaining| {
-                    try buffer.writer().print("UNSUB {d} {d}\r\n", .{ sub.sid, remaining });
+                    try buffer.print(self.allocator, "UNSUB {d} {d}\r\n", .{ sub.sid, remaining });
                     log.debug("Re-subscribed to {s} with sid {d} and autounsubscribe limit {d} (delivered: {d})", .{ sub.subject, sub.sid, remaining, delivered });
                 } else {
                     log.debug("Re-subscribed to {s} with sid {d}", .{ sub.subject, sub.sid });

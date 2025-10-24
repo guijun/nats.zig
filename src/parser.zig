@@ -77,9 +77,10 @@ pub const Parser = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
+        const al = std.ArrayList(u8).initCapacity(allocator, 0) catch undefined;
         return Self{
             .allocator = allocator,
-            .arg_buf_rec = std.ArrayList(u8).init(allocator),
+            .arg_buf_rec =  al,
             .msg_pool = MessagePool.init(allocator),
         };
     }
@@ -196,7 +197,7 @@ pub const Parser = struct {
                         else => {
                             // Only accumulate if we're in split buffer mode
                             if (self.arg_buf) |arg_buf| {
-                                try arg_buf.append(b);
+                                try arg_buf.append(self.allocator, b);
                             }
                         },
                     }
@@ -393,7 +394,7 @@ pub const Parser = struct {
                         else => {
                             // Only accumulate if we're in split buffer mode
                             if (self.arg_buf) |arg_buf| {
-                                try arg_buf.append(b);
+                                try arg_buf.append(self.allocator, b);
                             }
                         },
                     }
@@ -466,7 +467,7 @@ pub const Parser = struct {
                         else => {
                             // Only accumulate if we're in split buffer mode
                             if (self.arg_buf) |arg_buf| {
-                                try arg_buf.append(b);
+                                try arg_buf.append(self.allocator, b);
                             }
                         },
                     }
@@ -486,7 +487,7 @@ pub const Parser = struct {
             // Set up arg_buf for next parse() call
             try self.setupArgBuf();
             const remaining_args = buf[self.after_space .. i - self.drop];
-            try self.arg_buf.?.appendSlice(remaining_args);
+            try self.arg_buf.?.appendSlice(self.allocator, remaining_args);
         }
     }
 

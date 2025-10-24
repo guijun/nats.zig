@@ -127,14 +127,16 @@ fn ChunkPool(comptime T: type, comptime chunk_size: usize) type {
     return struct {
         chunks: std.ArrayList(*Chunk),
         max_size: usize,
+        allocator: Allocator,
 
         const Chunk = ChunkType(T, chunk_size);
         const Self = @This();
 
         fn init(allocator: Allocator, max_size: usize) Self {
             return .{
-                .chunks = std.ArrayList(*Chunk).init(allocator),
+                .chunks = std.ArrayList(*Chunk).initCapacity(allocator,0) catch undefined,
                 .max_size = max_size,
+                .allocator = allocator,
             };
         }
 
@@ -142,7 +144,7 @@ fn ChunkPool(comptime T: type, comptime chunk_size: usize) type {
             for (self.chunks.items) |chunk| {
                 allocator.destroy(chunk);
             }
-            self.chunks.deinit();
+            self.chunks.deinit(self.allocator);
         }
 
         fn get(self: *Self) ?*Chunk {
@@ -155,7 +157,7 @@ fn ChunkPool(comptime T: type, comptime chunk_size: usize) type {
                 return false;
             }
             chunk.reset();
-            self.chunks.append(chunk) catch return false;
+            self.chunks.append(self.allocator, chunk) catch return false;
             return true;
         }
     };
@@ -941,7 +943,7 @@ test "byte buffer specialization" {
     var buffer = Buffer.init(allocator, .{});
     defer buffer.deinit();
 
-    try buffer.append("Hello, World!");
+    try buffer.append(allocator, "Hello, World!");
 
     var view_opt = buffer.tryGetSlice();
     if (view_opt) |*view| {
@@ -1067,7 +1069,7 @@ test "buffer close functionality" {
     defer buffer.deinit();
 
     // Append some data before closing
-    try buffer.append("Hello");
+    try buffer.append(allocator, "Hello");
 
     // Close the buffer
     buffer.close();
@@ -1097,8 +1099,8 @@ test "buffer moveToBuffer functionality" {
     defer dest.deinit();
 
     // Add data to source buffer
-    try source.append("Hello, ");
-    try source.append("World!");
+    try source.append(allocator, "Hello, ");
+    try source.append(allocator, "World!");
 
     // Verify source has data
     try std.testing.expectEqual(@as(usize, 13), source.getBytesAvailable());
@@ -1132,9 +1134,9 @@ test "buffer moveToBuffer with multiple chunks" {
     defer dest.deinit();
 
     // Add data that spans multiple chunks
-    try source.append("First chunk "); // 12 bytes, spans 2 chunks
-    try source.append("Second chunk "); // 13 bytes, spans 2 more chunks
-    try source.append("Third"); // 5 bytes
+    try source.append(allocator, "First chunk "); // 12 bytes, spans 2 chunks
+    try source.append(allocator, "Second chunk "); // 13 bytes, spans 2 more chunks
+    try source.append(allocator, "Third"); // 5 bytes
 
     const total_bytes = 12 + 13 + 5; // 30 bytes
     try std.testing.expectEqual(total_bytes, source.getBytesAvailable());

@@ -31,8 +31,8 @@ test "NAK redelivery with delivery count verification" {
 
         fn init(allocator: std.mem.Allocator) @This() {
             return .{
-                .messages = std.ArrayList([]const u8).init(allocator),
-                .delivery_counts = std.ArrayList(u64).init(allocator),
+                .messages = std.ArrayList([]const u8).initCapacity(allocator, 0),
+                .delivery_counts = std.ArrayList(u64).initCapacity(allocator, 0),
                 .allocator = allocator,
             };
         }
