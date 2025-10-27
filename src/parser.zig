@@ -86,7 +86,7 @@ pub const Parser = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.arg_buf_rec.deinit();
+        self.arg_buf_rec.deinit(self.allocator);
         if (self.ma.msg) |msg| {
             msg.deinit();
         }

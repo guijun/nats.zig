@@ -1227,6 +1227,7 @@ pub const Connection = struct {
 
         // Build CONNECT message with all options
         var buffer = try ArrayList(u8).initCapacity(allocator, 0);
+        defer buffer.deinit(allocator);
 
         // Calculate effective no_responders: enable if server supports headers
         const no_responders = self.options.no_responders and self.server_info.headers;
@@ -1253,14 +1254,14 @@ pub const Connection = struct {
             .auth_token = auth_token,
         };
 
-        var writer: std.Io.Writer.Allocating = .fromArrayList(self.allocator, &buffer);
+        var writer: std.Io.Writer.Allocating = .fromArrayList(allocator, &buffer);
         try writer.writer.writeAll("CONNECT ");
         try std.json.fmt(connect_obj, .{}).format(&writer.writer);
         try writer.writer.writeAll("\r\n");
         try writer.writer.writeAll("PING\r\n");
         // Send via buffer (mutex already held)
-        try self.write_buffer.append(try writer.toOwnedSlice());
-
+        const content = try writer.toOwnedSlice();
+        try self.write_buffer.append(content);
         ////////////////////////////////////////////////////////////////////////////////
         // try buffer.writer().writeAll("CONNECT ");
         // try std.json.stringify(connect_obj, .{}, buffer.writer());
