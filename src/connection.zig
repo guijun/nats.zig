@@ -713,9 +713,9 @@ pub const Connection = struct {
 
         var buffer = try ArrayList(u8).initCapacity(allocator, 0);
         if (sub.queue) |group| {
-            try buffer.print(self.allocator, "SUB {s} {s} {d}\r\n", .{ sub.subject, group, sub.sid });
+            try buffer.print(allocator, "SUB {s} {s} {d}\r\n", .{ sub.subject, group, sub.sid });
         } else {
-            try buffer.print(self.allocator, "SUB {s} {d}\r\n", .{ sub.subject, sub.sid });
+            try buffer.print(allocator, "SUB {s} {d}\r\n", .{ sub.subject, sub.sid });
         }
         try self.write_buffer.append(buffer.items);
     }
