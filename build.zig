@@ -85,5 +85,140 @@ pub fn build(b: *std.Build) void {
     const unit_tests_step = b.step("test-unit", "Run unit tests");
     unit_tests_step.dependOn(&run_lib_unit_tests.step);
 
+    // Integration tests (require Docker and NATS server)
+    const integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/all_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+        .test_runner = .{ .path = b.path("test_runner.zig"), .mode = .simple },
+    });
+    integration_tests.root_module.addImport("nats", lib_mod);
 
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+    run_integration_tests.has_side_effects = true; // Allow repeated runs with Docker interactions
+
+    const e2e_tests_step = b.step("test-e2e", "Run end-to-end tests (requires Docker)");
+    e2e_tests_step.dependOn(&run_integration_tests.step);
+
+    // All tests - this is now the main test target
+    const test_step = b.step("test", "Run all tests (unit and e2e)");
+    test_step.dependOn(&run_lib_unit_tests.step);
+    test_step.dependOn(&run_integration_tests.step);
+
+    // Create all example executables
+    const example_files = [_]struct { name: []const u8, file: []const u8 }{
+        .{ .name = "pub", .file = "examples/pub.zig" },
+        .{ .name = "sub", .file = "examples/sub.zig" },
+        .{ .name = "requestor", .file = "examples/requestor.zig" },
+        .{ .name = "replier", .file = "examples/replier.zig" },
+    };
+
+    const examples_step = b.step("examples", "Build all examples");
+
+    for (example_files) |example_info| {
+        const exe = b.addExecutable(.{
+            .name = example_info.name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(example_info.file),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        exe.root_module.addImport("nats", lib_mod);
+
+        // Only install examples when explicitly building examples step
+        const install_exe = b.addInstallArtifact(exe, .{});
+        examples_step.dependOn(&install_exe.step);
+    }
+
+    // Create benchmark executables
+    const benchmark_files = [_]struct { name: []const u8, file: []const u8 }{
+        .{ .name = "echo_server", .file = "benchmarks/echo_server.zig" },
+        .{ .name = "echo_client", .file = "benchmarks/echo_client.zig" },
+        .{ .name = "publisher", .file = "benchmarks/publisher.zig" },
+        .{ .name = "subscriber", .file = "benchmarks/subscriber.zig" },
+    };
+
+    const benchmarks_step = b.step("benchmarks", "Build all benchmarks");
+
+    for (benchmark_files) |benchmark_info| {
+        const exe = b.addExecutable(.{
+            .name = benchmark_info.name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(benchmark_info.file),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        exe.root_module.addImport("nats", lib_mod);
+
+        // Only install benchmarks when explicitly building benchmarks step
+        const install_exe = b.addInstallArtifact(exe, .{});
+        benchmarks_step.dependOn(&install_exe.step);
+    }
+
+    // C benchmarks (require libnats)
+    const c_echo_server = b.addExecutable(.{
+        .name = "echo_server_c",
+        .root_module = b.createModule(.{
+            .root_source_file = null,
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    c_echo_server.addCSourceFile(.{ .file = b.path("benchmarks/echo_server.c"), .flags = &.{} });
+    c_echo_server.addCSourceFile(.{ .file = b.path("benchmarks/bench_util.c"), .flags = &.{} });
+    c_echo_server.linkLibC();
+    c_echo_server.linkSystemLibrary("nats");
+
+    const c_echo_client = b.addExecutable(.{
+        .name = "echo_client_c",
+        .root_module = b.createModule(.{
+            .root_source_file = null,
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    c_echo_client.addCSourceFile(.{ .file = b.path("benchmarks/echo_client.c"), .flags = &.{} });
+    c_echo_client.addCSourceFile(.{ .file = b.path("benchmarks/bench_util.c"), .flags = &.{} });
+    c_echo_client.linkLibC();
+    c_echo_client.linkSystemLibrary("nats");
+
+    const c_publisher = b.addExecutable(.{
+        .name = "publisher_c",
+        .root_module = b.createModule(.{
+            .root_source_file = null,
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    c_publisher.addCSourceFile(.{ .file = b.path("benchmarks/publisher.c"), .flags = &.{} });
+    c_publisher.addCSourceFile(.{ .file = b.path("benchmarks/bench_util.c"), .flags = &.{} });
+    c_publisher.linkLibC();
+    c_publisher.linkSystemLibrary("nats");
+
+    const c_subscriber = b.addExecutable(.{
+        .name = "subscriber_c",
+        .root_module = b.createModule(.{
+            .root_source_file = null,
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    c_subscriber.addCSourceFile(.{ .file = b.path("benchmarks/subscriber.c"), .flags = &.{} });
+    c_subscriber.addCSourceFile(.{ .file = b.path("benchmarks/bench_util.c"), .flags = &.{} });
+    c_subscriber.linkLibC();
+    c_subscriber.linkSystemLibrary("nats");
+
+    const install_c_echo_server = b.addInstallArtifact(c_echo_server, .{});
+    const install_c_echo_client = b.addInstallArtifact(c_echo_client, .{});
+    const install_c_publisher = b.addInstallArtifact(c_publisher, .{});
+    const install_c_subscriber = b.addInstallArtifact(c_subscriber, .{});
+
+    benchmarks_step.dependOn(&install_c_echo_server.step);
+    benchmarks_step.dependOn(&install_c_echo_client.step);
+    benchmarks_step.dependOn(&install_c_publisher.step);
+    benchmarks_step.dependOn(&install_c_subscriber.step);
 }

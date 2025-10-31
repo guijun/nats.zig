@@ -77,10 +77,9 @@ pub const Parser = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
-        const al = std.ArrayList(u8).initCapacity(allocator, 0) catch undefined;
         return Self{
             .allocator = allocator,
-            .arg_buf_rec =  al,
+            .arg_buf_rec = std.ArrayList(u8){},
             .msg_pool = MessagePool.init(allocator),
         };
     }
